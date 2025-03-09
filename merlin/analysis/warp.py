@@ -2,7 +2,8 @@ from typing import List
 from typing import Union
 import numpy as np
 from skimage import transform
-from skimage import feature
+# from skimage import feature
+from skimage import registration
 import cv2
 
 from merlin.core import analysistask
@@ -202,7 +203,7 @@ class FiducialCorrelationWarp(Warp):
             self.dataSet.get_fiducial_image(self.dataSet.get_data_organization().get_data_channel_index(self.parameters['reference_channel']),
                 fragmentIndex))
 
-        offsets = [feature.register_translation(
+        offsets = [registration.phase_cross_correlation(
             fixedImage,
             self._filter(self.dataSet.get_fiducial_image(x, fragmentIndex)),
             100)[0] for x in
