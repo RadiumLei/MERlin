@@ -24,7 +24,7 @@ pip install cellpose==2.0.5
 pip install -e MERlin
 ```
 
-## Verify Environment Configuration
+## Verify Environment Configuration (optional)
 Check the `~/.merlinenv` file for the following environment variables:
 
 
