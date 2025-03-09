@@ -25,9 +25,6 @@ class Warp(analysistask.ParallelAnalysisTask):
         if 'write_aligned_images' not in self.parameters:
             self.parameters['write_aligned_images'] = False
 
-        if 'reference_channel' not in self.parameters:
-            self.parameters['reference_channel'] = 'DAPI'
-
         self.writeAlignedFiducialImages = self.parameters[
                 'write_fiducial_images']
 
@@ -176,6 +173,12 @@ class FiducialCorrelationWarp(Warp):
         if 'highpass_sigma' not in self.parameters:
             self.parameters['highpass_sigma'] = 3
 
+        if 'reference_channel' not in self.parameters:
+            self.parameters['reference_channel'] = 'DAPI'
+
+        if 'crop_size' not in self.parameters:
+            self.parameters['crop_size'] = 200   # Adjust this based on image size
+
     def fragment_count(self):
         return len(self.dataSet.get_fovs())
 
@@ -196,18 +199,27 @@ class FiducialCorrelationWarp(Warp):
             inputImage, (highPassFilterSize, highPassFilterSize),
             highPassSigma, borderType=cv2.BORDER_REPLICATE)
 
+    def _crop(self, inputImage: np.ndarray) -> np.ndarray:
+        crop_size = self.parameters['crop_size']
+        h, w = inputImage.shape
+        img_crop = inputImage[h//2 - crop_size:h//2 + crop_size, w//2 - crop_size:w//2 + crop_size]
+
+        return img_crop
+
     def _run_analysis(self, fragmentIndex: int):
         # TODO - this can be more efficient since some images should
         # use the same alignment if they are from the same imaging round
         fixedImage = self._filter(
             self.dataSet.get_fiducial_image(self.dataSet.get_data_organization().get_data_channel_index(self.parameters['reference_channel']),
                 fragmentIndex))
+        fixedImage = self._crop(fixedImage)
 
         offsets = [registration.phase_cross_correlation(
-            fixedImage,
-            self._filter(self.dataSet.get_fiducial_image(x, fragmentIndex)),
-            100)[0] for x in
+            reference_image = fixedImage,
+            moving_image = self._crop(self._filter(self.dataSet.get_fiducial_image(x, fragmentIndex))),
+            upsample_factor = 10)[0] for x in
                    self.dataSet.get_data_organization().get_data_channels()]
+        
         transformations = [transform.SimilarityTransform(
             translation=[-x[1], -x[0]]) for x in offsets]
         self._process_transformations(transformations, fragmentIndex)
