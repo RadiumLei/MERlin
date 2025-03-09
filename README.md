@@ -27,17 +27,18 @@ pip install -e MERlin
 ## Verify Environment Configuration
 Check the `~/.merlinenv` file for the following environment variables:
 
+
+### Harvard RC (netscratch) Configuration
+```bash
+DATA_HOME=/n/netscratch/zhuang_lab/Lab/zhiyun
+ANALYSIS_HOME=/n/netscratch/zhuang_lab/Lab/zhiyun/merlin_analysis
+PARAMETERS_HOME=/n/netscratch/zhuang_lab/Lab/zhiyun/merlin_parameters
+```
+
 ### Cloud Storage Configuration
 ```bash
 DATA_HOME=gc://r3fang_east4/merfish_raw_data
-ANALYSIS_HOME=/home/r3fang_g_harvard_edu/merlin_analysis
-PARAMETERS_HOME=/home/r3fang_g_harvard_edu/merlin_parameters
-```
-
-### Guava Server Configuration
-```bash
-DATA_HOME=/home/r3fang/NAS/Fang/RawData/MERFISH2
-ANALYSIS_HOME=/home/r3fang/NAS/Fang/r3fang/MERFISH/merlin_analysis
-PARAMETERS_HOME=/home/r3fang/NAS/Fang/r3fang/MERFISH/merlin_parameters
+ANALYSIS_HOME=/home/zhiyun_lei_g_harvard_edu/merlin_analysis
+PARAMETERS_HOME=/home/zhiyun_lei_g_harvard_edu/merlin_parameters
 ```
 
