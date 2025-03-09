@@ -24,6 +24,9 @@ class Warp(analysistask.ParallelAnalysisTask):
         if 'write_aligned_images' not in self.parameters:
             self.parameters['write_aligned_images'] = False
 
+        if 'reference_channel' not in self.parameters:
+            self.parameters['reference_channel'] = 'DAPI'
+
         self.writeAlignedFiducialImages = self.parameters[
                 'write_fiducial_images']
 
@@ -196,7 +199,9 @@ class FiducialCorrelationWarp(Warp):
         # TODO - this can be more efficient since some images should
         # use the same alignment if they are from the same imaging round
         fixedImage = self._filter(
-            self.dataSet.get_fiducial_image(0, fragmentIndex))
+            self.dataSet.get_fiducial_image(self.dataSet.get_data_organization().get_data_channel_index(self.parameters['reference_channel']),
+                fragmentIndex))
+
         offsets = [feature.register_translation(
             fixedImage,
             self._filter(self.dataSet.get_fiducial_image(x, fragmentIndex)),
@@ -205,3 +210,4 @@ class FiducialCorrelationWarp(Warp):
         transformations = [transform.SimilarityTransform(
             translation=[-x[1], -x[0]]) for x in offsets]
         self._process_transformations(transformations, fragmentIndex)
+
