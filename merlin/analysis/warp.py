@@ -118,14 +118,26 @@ class Warp(analysistask.ParallelAnalysisTask):
 
             with self.dataSet.writer_for_analysis_images(
                     self, 'aligned_fiducial_images', fov) as outputTif:
+
                 for t, x in zip(transformationList, dataChannels):
+
                     inputImage = self.dataSet.get_fiducial_image(x, fov)
                     transformedImage = transform.warp(
                             inputImage, t, preserve_range=True) \
                         .astype(inputImage.dtype)
-                    transformedImage = transformedImage / transformedImage.max() * 255
+
+                    # Compute the lower and upper percentiles (saturating 0.3%)
+                    lower_percentile = np.percentile(transformedImage, 0.15)  # 0.15% lower bound
+                    upper_percentile = np.percentile(transformedImage, 99.85) # 99.85% upper bound
+                    # Clip values to the computed percentiles
+                    transformedImage = np.clip(transformedImage, lower_percentile, upper_percentile)
+                    # Normalize to [0, 255] range
+                    transformedImage = (transformedImage - lower_percentile) / (upper_percentile - lower_percentile) * 255
+                    # Round and convert to uint8
+                    transformedImage = np.round(transformedImage).astype(np.uint8)
+
                     outputTif.save(
-                            transformedImage.astype(np.uint8), 
+                            transformedImage, 
                             photometric='MINISBLACK',
                             metadata=fiducialImageDescription)
 
