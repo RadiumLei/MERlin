@@ -106,7 +106,7 @@ class Warp(analysistask.ParallelAnalysisTask):
                         transformedImage = transform.warp(
                                 inputImage, t, preserve_range=True) \
                             .astype(inputImage.dtype)
-                        outputTif.save(
+                        outputTif.write(
                                 transformedImage,
                                 photometric='MINISBLACK',
                                 metadata=imageDescription)
@@ -136,7 +136,7 @@ class Warp(analysistask.ParallelAnalysisTask):
                     # Round and convert to uint8
                     transformedImage = np.round(transformedImage).astype(np.uint8)
 
-                    outputTif.save(
+                    outputTif.write(
                             transformedImage, 
                             photometric='MINISBLACK',
                             metadata=fiducialImageDescription)
