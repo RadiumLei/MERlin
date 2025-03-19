@@ -25,7 +25,11 @@ import cellpose
 import skimage
 from skimage import transform
 from shapely.geometry import Point, LineString, Polygon
-from PIL import Image as im        
+from PIL import Image as im
+
+import pickle
+
+
 
 class FeatureSavingAnalysisTask(analysistask.ParallelAnalysisTask):
 
@@ -348,7 +352,7 @@ class CellPoseSegment(FeatureSavingAnalysisTask):
                     self, 'feature', fragmentIndex) as outputTif:
                 for maskImage in stacked_images:
                     outputTif.save(
-                            maskImage.astype(np.uint16), 
+                            maskImage[0].astype(np.uint16), 
                             photometric='MINISBLACK',
                             metadata=maskImageDescription)
         
@@ -699,7 +703,7 @@ class ExportCellBoundaries(analysistask.AnalysisTask):
         
         self.segmentTask = self.dataSet.load_analysis_task(
             self.parameters['segment_task'])
-        
+
     def get_estimated_memory(self):
         return 2048
 
@@ -708,21 +712,129 @@ class ExportCellBoundaries(analysistask.AnalysisTask):
 
     def get_dependencies(self):
         return [self.parameters['segment_task']]
-    
-    def write_feature(self, gdf, fname):
-        self.dataSet.save_geodataframe_to_pkl(
-            gdf, fname, self.analysisName)
 
     def _run_analysis(self):
         gdf = self.segmentTask.get_feature_database().read_feature_geopandas()
-        self.write_feature(gdf, "feature_boundaries")
+        self.dataSet.save_geodataframe_to_shp(gdf, 'feature_boundaries',
+                                          self.analysisName, index=False)
+        gdf_max_list = []
+        for ft_id in set(gdf.id):
+            indexMax = gdf[gdf.id == ft_id].area.argmax()
+            gdf_max_list.append(gdf[gdf.id == ft_id].iloc[[indexMax]])
+        gdf_max = pandas.concat(gdf_max_list, 0)
+
+        self.dataSet.save_geodataframe_to_shp(gdf_max, 'feature_boundaries_max',
+                                           self.analysisName, index=False)
+
+
+
+class AlignSegment(FeatureSavingAnalysisTask):
+    """
+    Aligns the query segment to the reference segment at each z-plane individually.
+    Ensures that the output retains the reference cell IDs, copying boundaries 
+    from the query when distance and overlap conditions are met.
+    """
+    
+    def __init__(self, dataSet, parameters=None, analysisName=None):
+        super().__init__(dataSet, parameters, analysisName)
         
-        # gdf_max_list = []
-        # for ft_id in set(gdf.id):
-        #     indexMax = gdf[gdf.id == ft_id].area.argmax()
-        #     gdf_max_list.append(gdf[gdf.id == ft_id].iloc[[indexMax]])
-        # gdf_max = pandas.concat(gdf_max_list, 0)
-        # self.write_feature(gdf_max, "feature_boundaries_max")
+        self.ref_segment = self.dataSet.load_analysis_task(self.parameters['reference_segment'])
+        self.query_segment = self.dataSet.load_analysis_task(self.parameters['query_segment'])
+        
+        self.distance_threshold = self.parameters.get('distance_threshold', 5)  # Default 5 microns
+        self.overlap_threshold = self.parameters.get('overlap_threshold', 0.7)  # Default 0.7
+    
+    def fragment_count(self):
+        return len(self.dataSet.get_fovs())
 
+    def get_estimated_memory(self):
+        return 2048
 
+    def get_estimated_time(self):
+        return 5
+
+    def get_dependencies(self):
+        return [self.parameters['reference_segment'], self.parameters['query_segment']]
+    
+    def _get_centroids(self, features, z_value):
+        """Extracts centroids from segmentation features for a specific z-plane."""
+        centroids = []
+        for feature in features:
+            all_z = feature.get_z_coordinates().tolist()
+            if z_value in all_z:
+                z_index = all_z.index(z_value)
+                boundaries = feature.get_boundaries()[z_index]
+                if boundaries:
+                    centroids.append(boundaries[0].centroid.coords[0])  # Get centroid from the first polygon
+                else:
+                    centroids.append((1e6, 1e6))  # Use large value as a placeholder for missing boundaries
+            else:
+                centroids.append((1e6, 1e6))  # Use large value as a placeholder for missing boundaries
+        return np.array(centroids) if centroids else np.empty((0, 2))
+    
+    def _compute_overlap(self, query_feature, ref_feature, z_index):
+        """Computes the overlap percentage between two features at a specific z-plane."""
+        query_area = sum([poly.area for poly in query_feature.get_boundaries()[z_index]])
+        intersection = sum([
+            query_poly.intersection(ref_poly).area 
+            for query_poly in query_feature.get_boundaries()[z_index] 
+            for ref_poly in ref_feature.get_boundaries()[z_index]
+        ])
+        return intersection / query_area if query_area > 0 else 0
+    
+    def _run_analysis(self, fragmentIndex):
+        """
+        Aligns the query segment to the reference segment by renaming cell IDs at each z-plane.
+        Ensures the output retains reference cell IDs, copying boundaries from query when possible.
+        """
+
+        ref_features = self.ref_segment.get_feature_database().read_features(fragmentIndex)
+        query_features = self.query_segment.get_feature_database().read_features(fragmentIndex)
+        
+        z_positions = self.dataSet.get_data_organization().get_z_positions()
+        num_z_planes = len(z_positions)
+
+        # Step 1: Create an empty feature list with reference cell IDs
+        aligned_features = {
+            ref_feature.get_feature_id(): spatialfeature.SpatialFeature(
+                boundaryList=[[] for _ in range(num_z_planes)],  # Empty boundaries for each Z
+                fov=ref_feature.get_fov(),
+                zCoordinates=ref_feature.get_z_coordinates(),
+                uniqueID=ref_feature.get_feature_id(),
+                x=ref_feature._x,
+                y=ref_feature._y
+            ) 
+            for ref_feature in ref_features
+        }
+
+        # Step 2: Iterate over each Z plane
+        for z_index, z_value in enumerate(z_positions):
+            ref_centroids = self._get_centroids(ref_features, z_value)
+            query_centroids = self._get_centroids(query_features, z_value)
+            
+            if len(ref_centroids) == 0 or len(query_centroids) == 0:
+                continue  # Skip if no valid centroids
+            
+            # Step 3: Use KDTree for nearest neighbor matching
+            tree = cKDTree(ref_centroids)
+            distances, indices = tree.query(query_centroids, k=1)
+            
+            for query_idx, query_feature in enumerate(query_features):
+                ref_idx = indices[query_idx]
+                if ref_idx >= len(ref_features):
+                    continue  # Skip invalid indices
+                
+                ref_feature = ref_features[ref_idx]
+                
+                if distances[query_idx] < self.distance_threshold:
+                    overlap = self._compute_overlap(query_feature, ref_feature, z_index)
+                    if overlap >= self.overlap_threshold:
+                        # Copy the boundary from query to reference-aligned feature
+                        aligned_features[ref_feature.get_feature_id()].get_boundaries()[z_index] = query_feature.get_boundaries()[z_index]
+        
+        # Convert aligned features dictionary to list
+        updated_query_features = list(aligned_features.values())
+        
+        # Step 4: Save updated features
+        self.get_feature_database().write_features(updated_query_features, fragmentIndex)     
 
